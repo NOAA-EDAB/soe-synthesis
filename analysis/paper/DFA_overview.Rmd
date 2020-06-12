@@ -1,0 +1,25 @@
+---
+title: "Dynamic Factor Analysis"
+author: "Scott Large"
+date: "6/12/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# remotes::install_github("fate-ewi/bayesdfa")
+# library(bayesdfa)
+
+```
+
+## Introduction
+
+
+## Materials and Methods
+
+# Data
+
+
+# Modeling
+
+We used [bayesDFA](https://cran.r-project.org/web/packages/bayesdfa/index.html) as a dimension reduction tool. 

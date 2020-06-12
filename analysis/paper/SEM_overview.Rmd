@@ -1,0 +1,30 @@
+---
+title: "Structural Equation Model"
+author: "Scott Large"
+date: "6/12/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Introduction
+
+
+## Materials and Methods
+
+# Data
+
+
+# Modeling
+We used SEM to further understand the direct and inderect effects of different environmental and biological variables. SEM is a statistical approach to parameterize and test hypothesized relationships, described as causal models between multiple variables, to solve a set of equations implied by a path diagram (@ref/Hox @ref/Grace). We compared maximum likelihood SEM with covariance matricies to explore linear and additive relationships and XYZ with abc to explore nonlinear relationships ([nlsem](https://www.jstatsoft.org/article/view/v077i07), Umbach et al 2017). . The SEM provides a more powerful way of identifying relationships among variables that are hierarchcially dependent (Stewart 2014)
+
+Structural equation models were fit using the `lavaan` package (Rosseel, 2011) in R by bootstrapping (x draws).
+
+
+
+Grace JB, Bollen KA (2005) Interpreting the results from multiple regression and structural equation models. Bulletin of the Ecological Society of America, 86, 283–295.
+
+Hox J, Bechger T (1998) An introduction to structural equation modelling. Family Science Review, 11, 354–373.
