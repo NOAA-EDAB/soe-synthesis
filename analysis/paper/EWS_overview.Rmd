@@ -1,0 +1,52 @@
+---
+title: "Spatial Early Warning Signals"
+author: "Scott Large"
+date: "6/17/2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# remotes::install_github("spatial-ews/spatialwarnings")
+# remotes::install_github("spatial-ews/spatialwarningsGis")
+# remotes::install_github("NOAA-EDAB/ecodata")
+# install.packages("spatialwarnings")
+
+library(ggplot2)
+library(spatialwarnings)
+library(spatialwarningsGis)
+library(ecodata)
+library(raster)
+library(sp)
+
+```
+
+
+## Introduction
+
+
+## Materials and Methods
+
+# Data
+
+Questions: 
+1. Need to figure out how to address NA/subsetting in data. See [issue](https://github.com/spatial-ews/spatialwarnings/issues/100) submitted at [spatialwarnings](ttps://github.com/spatial-ews/spatialwarnings/) github.  
+2. Continuous data: See [Génin et al 2018 *Methods in Ecology and Evolution*](https://besjournals.onlinelibrary.wiley.com/doi/pdf/10.1111/2041-210X.13058)
+>All indicators can be computed on matrices containing binary (boolean, TRUE/FALSE) data, but some of them can also be computed on continuous (numerical) data. A continuous matrix can be transformed into a binary matrix by thresholding or classification. However, this transformation needs to be done carefully depending on the ecological context of the data and is therefore left to the user (but see Appendix S3).
+![From Génin et al 2018 *Methods in Ecology and Evolution*](https://besjournals.onlinelibrary.wiley.com/cms/asset/0b941603-3772-421f-8959-c9eb3216c7af/mee313058-fig-0001-m.jpg)
+
+
+```{r}
+## Get data from ECSA (I'm sure it's elsewhere, too)
+load(url("https://github.com/NOAA-EDAB/ECSA/blob/master/data-raw/temperature_spring_surface.rdata?raw=true"))
+
+
+ex <- temperature_spring_surface[[1]]
+display_matrix(ex)
+generic_sews(ex)
+
+```
+
+
