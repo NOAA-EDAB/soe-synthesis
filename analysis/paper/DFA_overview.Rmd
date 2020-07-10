@@ -10,10 +10,13 @@ editor_options:
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 # remotes::install_github("fate-ewi/bayesdfa")
-library(bayesdfa)
+remotes::install_github("nwfsc-timeseries/MARSS")
+install.packages("broom")
+# library(bayesdfa)
+library(MARSS)
 library(dplyr)
 library(tidyr)
-
+library(broom)
 ```
 
 ## Introduction
@@ -82,7 +85,7 @@ sp_list <- bio_n %>%
   filter(EPU == "GB",
          Season == "fall") %>% 
   pull(comname)
-  
+
 
 bio_wide <- bio %>%
   filter(EPU == "GB",
@@ -91,15 +94,78 @@ bio_wide <- bio %>%
   tidyr::pivot_wider(names_from = Time, values_from = kg_tow) %>% 
   ungroup() %>% 
   select(-EPU, -Season) %>% 
-  as.data.frame() %>% 
-  head(10)
+  as.data.frame() #%>% 
+  # head(10)
 
 row.names(bio_wide) <- bio_wide$comname
 bio_wide <- bio_wide[,-1]
 
 # matplot(t(bio_wide), type = "l")
 
+mod_list <- list(m = 3, 
+                 R = "diagonal and unequal")
+
+
+# kemz.3 = MARSS::MARSS(as.matrix(bio_wide),
+#                       model = mod_list,
+#                       z.score = TRUE,
+#                       form = "dfa",
+#                       control = cntl_list)
+
+
+# set new control params
+cntl_list = list(minit = 200,
+                 maxit = 5000, 
+                 allow.degen = FALSE)
+
+# set up forms of R matrices
+levels_R = c("diagonal and equal",
+             "diagonal and unequal",
+             "equalvarcov",
+             "unconstrained")
+N_ts = 5
+
+model_data = data.frame()
+# fit lots of models & store results
+# NOTE: this will take a long time to run!
+for(R in levels_R) {
+  for(m in 1:(N_ts)) {
+    dfa_model = list(A = "zero",
+                     R = R,
+                     m = m)
+    kemz = MARSS(as.matrix(bio_wide), 
+                 model = dfa_model, 
+                 control = cntl_list,
+                 form = "dfa",
+                 z.score = TRUE)
+
+    model_data = rbind(model_data,
+                       data.frame(R = R,
+                                  m = m,
+                                  logLik = kemz$logLik,
+                                  K = kemz$num.params,
+                                  AICc = kemz$AICc,
+                                  stringsAsFactors = FALSE))
+    assign(paste("kemz", m, R, sep="_"), kemz)
+    saveRDS(kemz, sprintf("kemz_%s_%s.rds", m, R))
+  } # end m loop
+} # end R loop
+
+
+library(ggplot2)
+theme_set(theme_bw())
+d <- tidy(kemz.3, type="states")
+ ggplot(data = d) + 
+   geom_line(aes(t, estimate)) +
+   geom_ribbon(aes(x=t, ymin=conf.low, ymax=conf.high), linetype=2, alpha=0.1) +
+   facet_grid(~term) +
+   xlab("Time Step") + ylab("Val")
+
+
 options(mc.cores=parallel::detectCores()-1) 
+
+
+
 
 f1 <- fit_dfa(
   y = bio_wide, 
