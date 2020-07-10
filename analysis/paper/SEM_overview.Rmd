@@ -7,6 +7,14 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+# install.packages("lavaan")
+# remotes::install_github("rstudio/nomnoml")
+# remotes::install_github("thomasp85/tidygraph")
+
+library(lavaan)
+library(nomnoml)
+library(tidygraph)
+library(ggraph)
 ```
 
 
@@ -17,6 +25,84 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # Data
 
+```{r}
+sim_dat <- read.csv("~/projects/soe-synthesis/analysis/data/simulated-dataset/simulated_biomass_catch.csv")
+sim_temp <- read.csv("~/projects/soe-synthesis/analysis/data/simulated-dataset/simulated_temperature.csv")
+
+```
+
+
+```{r}
+
+
+bio <- sim_dat %>% 
+  select(Year, Species, Biomass) %>%
+  group_by(Year) %>%
+  dplyr::mutate(Biomass = scale(Biomass, center = TRUE, scale = TRUE)) %>% 
+  tidyr::pivot_wider(names_from = Species, values_from = Biomass) %>% 
+  as.data.frame()
+
+catch <- sim_dat %>% 
+  select(Year, Species, catch) %>%
+  group_by(Year) %>%
+  dplyr::mutate(Species = paste0(Species, "_c"), 
+                catch = scale(catch, center = TRUE, scale = TRUE)) %>% 
+  tidyr::pivot_wider(names_from = Species, values_from = catch) %>% 
+  as.data.frame()
+
+all_dat <- cbind(bio, 
+                 catch,
+                 temp = sim_temp$Anomaly)
+
+
+model <- '
+  # measurement model
+    system_biomass =~ Herring + Cod + Yellowtail + Goosefish
+  # regressions
+    system_biomass ~ temp
+  # residual correlations
+    Herring ~~ Cod
+    Herring ~~ Herring
+'
+
+fit <- sem(model, data=all_dat)
+summary(fit, standardized=TRUE)
+plot(fit)
+sp_coef
+
+
+```
+
+
+
+```{r}
+sp_coef <- rbind(
+  c("Atlantic_herring",	0.00000001, 1.40E-07, 0.000000605, 0),
+  c("Atlantic_cod",	0, 4.20E-07, 0.0000008, 0),
+  c("Goosefish", 0, 2.97E-07, 1.00E-06, 0),
+  c("Yellowtail",	0, 0, 0, 7.50E-07))
+
+colnames(sp_coef) <- c("to", "Atlantic_herring", "Atlantic_cod", "Goosefish", "Yellowtail")
+
+sp_graph <- tibble::as_tibble(sp_coef) %>% 
+  tidyr::pivot_longer(-to, names_to = "from", values_to = "weight") %>% 
+  select(from,
+         to,
+         weight) %>% 
+  as_tbl_graph()
+
+
+create_layout(sp_graph, layout = "auto")
+
+sp_graph %>% 
+  ggraph(layout = "hive") + 
+  geom_edge_link() + 
+  geom_node_point(size = 8, colour = 'steelblue') +
+  geom_node_text(aes(label = name), colour = 'black', vjust = 0.4) + 
+  ggtitle('Joining graphs') + 
+  theme_graph()
+
+```
 
 # Modeling
 We used SEM to further understand the direct and inderect effects of different environmental and biological variables. SEM is a statistical approach to parameterize and test hypothesized relationships, described as causal models between multiple variables, to solve a set of equations implied by a path diagram (@ref/Hox @ref/Grace). We compared maximum likelihood SEM with covariance matricies to explore linear and additive relationships and XYZ with abc to explore nonlinear relationships ([nlsem](https://www.jstatsoft.org/article/view/v077i07), Umbach et al 2017). . The SEM provides a more powerful way of identifying relationships among variables that are hierarchcially dependent (Stewart 2014)
