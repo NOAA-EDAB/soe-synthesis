@@ -3,23 +3,156 @@ title: "Dynamic Factor Analysis"
 author: "Scott Large"
 date: "6/12/2020"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 # remotes::install_github("fate-ewi/bayesdfa")
-# library(bayesdfa)
+library(bayesdfa)
+library(dplyr)
+library(tidyr)
 
 ```
 
 ## Introduction
 
+1. EBFM and IEA yadda yadda yadda
+1. The need for synthesis in IEAs
+    + Improving story-telling with indexes
+    + Creating hypotheses for causal relationships
+    + Move from "so-what" towards opperational EBFM/EAFM
+1. The State of the Ecosystem Report (SOE) has many indicators but explaining teleconnections and "bigger picture" messages remains a challenge.
+1. Here, we seek to reduce the dimensionality of data to:
+    + identify common trends between indicators to serve as an ecosystem index
+    + identify covariates that improve explanatory power of common trends
+    + ?
+1. DFAs identify latent trends in time-series using some fancy-pants maths.
+    + We are tracking stability using feeding guilds. 
+        + If we use raw species kg/tow survey data to identify common trends between species, these might provide additional/better/other insight into ecosystem stability. 
+        + Covariates can also be included to identify hypotheses that might be useful for improved management  
+        + *n.b. VAST can do spatial DFA, so this could all be done within a single framework -- I don't know how or if it would require unreasonable computing resources* 
+    + Potential covariate data: environmental (e.g., SST, BT, and chla) and socio-economic (e.g., revenue, engagement, landings, etc)
 
 ## Materials and Methods
 
 # Data
+```{r get-data}
+# remotes::install_github("NOAA-EDAB/ecodata")
+data("nefsc_survey_disaggregated", package = "ecodata")
+
+year_n <- length(unique(nefsc_survey_disaggregated$Time))
+
+bio <- nefsc_survey_disaggregated %>% 
+  # dplyr::filter(Time >= 1990) %>%
+  dplyr::mutate(comname = gsub(" ", "_", comname)) %>% 
+  group_by(EPU, Season, comname) %>%
+    dplyr::mutate(kg_tow = scale(kg.per.tow, center = TRUE, scale = TRUE)) %>% 
+  dplyr::select(EPU, Time, Season, comname, kg_tow)
+
+## Work on this -- right now it is taking presence per year, should be a cutoff of stations per year 
+bio_n <- bio %>%
+  group_by(EPU, Season, comname) %>%
+  summarize(count = sum(!is.na(kg_tow)),
+            prop = count/year_n) %>%
+  filter(prop >= .99)
+# 
+# bio_n_table <- bio_n %>% 
+#   group_by(EPU, Season) %>% 
+#   summarize()
+  
+
+```
+
+1. Survey data
+    + For each ecoregion, select the *n* species that occur in *x* tows and aggregate to annual/seasonal
+    + *VAST, we would just need to filter for subset of species and not worry about aggregating to annual/seasonal values.*
+1. Environmental data
+    + For each ecoregion: Seasonal bottom temperature,
+    + Basin-wide: NAO, AMO, ...? 
+    + *VAST could use interpolated station data from Kevin*
+
+
+
+
+```{r prepare-data}
+
+sp_list <- bio_n %>% 
+  filter(EPU == "GB",
+         Season == "fall") %>% 
+  pull(comname)
+  
+
+bio_wide <- bio %>%
+  filter(EPU == "GB",
+         Season == "fall",
+         comname %in% sp_list) %>% 
+  tidyr::pivot_wider(names_from = Time, values_from = kg_tow) %>% 
+  ungroup() %>% 
+  select(-EPU, -Season) %>% 
+  as.data.frame() %>% 
+  head(10)
+
+row.names(bio_wide) <- bio_wide$comname
+bio_wide <- bio_wide[,-1]
+
+# matplot(t(bio_wide), type = "l")
+
+options(mc.cores=parallel::detectCores()-1) 
+
+f1 <- fit_dfa(
+  y = bio_wide, 
+  num_trends = 3,
+  zscore = FALSE,
+  iter = 1000, 
+  # control = list(adapt_delta = 0.9,
+  #                max_treedepth = 14),
+  # obs_covar = obs_covar,
+  chains = 4,
+  thin = 1
+)
+
+is_converged(f1, threshold = 1.05)
+
+
+r <- rotate_trends(f1)
+names(r)
+plot_trends(r)
+plot_fitted(f1)
+```
 
 
 # Modeling
 
 We used [bayesDFA](https://cran.r-project.org/web/packages/bayesdfa/index.html) as a dimension reduction tool. 
+
+
+```{r eval=FALSE}
+m <- find_dfa_trends(
+  y = s$y_sim, iter = 180,
+  kmin = 1, kmax = 5, chains = 1, compare_normal = TRUE,
+  variance = c("equal", "unequal")
+)
+```
+
+
+```{r fit-models}
+
+f1 <- fit_dfa(
+  y = sim_dat$y_sim, num_trends = 1, zscore = TRUE,
+  iter = 200, chains = 1, thin = 1
+)
+
+
+is_converged(f1, threshold = 1.05)
+
+r <- rotate_trends(f1)
+
+```
+
+
+
+```{r plot-1-trend, fig.align='center', fig.cap="Estimated trend and 95% CI for a 1-trend DFA model applied to simulated data.\\label{fig:simulate-data-plot}"}
+plot_trends(r)
+```
