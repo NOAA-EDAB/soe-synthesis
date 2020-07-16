@@ -11,8 +11,12 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 # remotes::install_github("fate-ewi/bayesdfa")
 # remotes::install_github("nwfsc-timeseries/MARSS")
+# remotes::install_github("DavisVaughan/furrr")
 # install.packages("broom")
 # library(bayesdfa)
+
+library(furrr)
+library(tictoc)
 library(MARSS)
 library(dplyr)
 library(tidyr)
@@ -23,7 +27,7 @@ library(ggrepel)
 library(patchwork)
 
 ##
-get_dfa_fits <- function(MLEobj, dd = NULL, alpha = 0.05) {
+get_dfa_fits <- function(MLEobj, dd = NULL, alpha = 0.05, return_tidy = TRUE) {
   ## empty list for results
   fits <- list()
   ## extra stuff for var() calcs
@@ -59,9 +63,25 @@ get_dfa_fits <- function(MLEobj, dd = NULL, alpha = 0.05) {
   ## upper & lower (1-alpha)% CI
   fits$up <- qnorm(1 - alpha/2) * SE + fits$ex
   fits$lo <- qnorm(alpha/2) * SE + fits$ex
-  return(fits)
+  fits$raw <- MLEobj$marss$data
+  if(return_tidy){
+    colnames(fits[["ex"]]) <-  colnames(MLEobj$call$data)
+    colnames(fits[["up"]]) <-  colnames(MLEobj$call$data)
+    colnames(fits[["lo"]]) <-  colnames(MLEobj$call$data)
+    colnames(fits[["raw"]]) <-  colnames(MLEobj$call$data)
+   
+    fits <- purrr::map_df(fits, ~ as.data.frame(.x), .id = "id") %>% 
+      dplyr::group_by(id) %>% 
+      dplyr::mutate(comname =  rownames(MLEobj$call$data)) %>% 
+      tidyr::pivot_longer(-c(comname, id), names_to = "Time", values_to = "val") %>%
+      tidyr::pivot_wider(names_from = id, values_from = val) %>% 
+      dplyr::mutate(Time = as.numeric(Time))
+    return(fits)
+  }
+  if(!return_tidy){
+    return(fits)
+  }
 }
-
 
 ```
 
@@ -116,7 +136,7 @@ mod_path <- "\\\\net.nefsc.noaa.gov/home5/slarge/projects/soe-synthesis/analysis
 all_out <- tibble(file_path = list.files(mod_path))
 
 mod_list <- all_out %>%
-  filter(!grepl("^kemz.*|model_out.*|marss-dfa.*|GB_fall-model_list.*", file_path)) %>% 
+  filter(!grepl("^kemz.*|model_out.*|marss-dfa.*|GB_fall-model_list.*|*.R", file_path)) %>% 
   mutate(out = gsub(".rds", "", file_path),
          file_path = paste0("\\\\net.nefsc.noaa.gov/home5/slarge/projects/soe-synthesis/analysis/models/", file_path)) %>% 
   separate(col = out, sep = "-", into = c("EPU", "Season", "R", "m",
@@ -127,14 +147,16 @@ mod_list <- all_out %>%
                              NA, 
                              covariateA))
 
+plan(multiprocess)
+tic()
 mod_out <- mod_list %>%
-  filter(EPU == "GB") %>%
-  group_by(EPU, Season) %>% 
-  mutate(AICc = purrr::map(file_path, function(x) readRDS(x)$AICc)) %>%
+  # filter(EPU == "GB") %>%
+  # group_by(EPU, Season) %>% 
+  mutate(AICc = future_map(file_path, function(x) readRDS(x)$AICc, .progress = FALSE)) %>%
   unnest(AICc) %>%
   ungroup()
-  # arrange(AICc)
 
+toc()
 ```
 
 
@@ -161,9 +183,6 @@ mod_plot <- mod_out %>%
   distinct(.keep_all = TRUE) %>%
   filter(!is.na(value))
 
-# epu = unique(mod_plot$EPU)
-# season = unique(mod_plot$Season)
-
 model_plot <- ggplot() +
   geom_point(data = mod_plot %>%  filter(n_covariate <= 1),
              aes(x = m, y = delta_AICc, shape = R, color = value)) +
@@ -175,7 +194,7 @@ model_plot <- ggplot() +
   facet_grid(EPU + Season ~ n_covariate) +
   scale_fill_brewer(type = "qual", palette = "Set1") +
   labs(title = "DFA model selection",
-       subtitle = sprintf("Number of covariates for %s", epu),
+       subtitle = "Number of covariates",
        color = "Covariate",
        y = "\u0394 AICc",
        x = "Number of trends") +
@@ -186,10 +205,8 @@ model_plot
 best_mod <- mod_plot %>%
   filter(!is.na(best_model)) %>%
   group_by(EPU, Season) %>% 
-  # nest() %>% 
-  # pull(file_path) %>%
   mutate(dat = purrr::map(file_path, ~readRDS(.x)))
-  # readRDS()
+
 tt <- best_mod %>% 
   mutate(sp_dat = purrr::map(dat, c("call", "data")),
          comname = purrr::map(sp_dat, ~rownames(.x)))
@@ -197,9 +214,6 @@ tt <- best_mod %>%
 sp_names <- tt %>% 
   select(EPU, Season, comname) %>% 
   unnest(comname)
-
-
-# sp_names <- rownames(best_mod$call$data)
 
 sp_guild <- ecodata::nefsc_survey_disaggregated %>%
   mutate(comname = as.character(comname),
@@ -216,7 +230,7 @@ sp_guild <- ecodata::nefsc_survey_disaggregated %>%
 
 ```{r trends-plot, eval=TRUE, fig.align='center', fig.cap="Estimated trend and 95% CI for the 'best model', a 4-trend DFA model with diagonal and equal covariance-variance matrices.\\label{fig:trends-plot}"}
 
-td <- best_mod %>% 
+trend_dat <- best_mod %>% 
   select(EPU, Season, dat) %>% 
   # group_by(EPU, Season) %>%
   mutate(d = map(dat, tidy, type = "states")) %>% 
@@ -231,8 +245,8 @@ td <- best_mod %>%
 #                           term == "X4" ~ "Trend 4",
 #                           TRUE ~ NA_character_))
 
-tr_plot <- ggplot(data = td) +
-  geom_hline(yintercept = 0, color = "grey60") +
+trend_plot <- ggplot(data = trend_dat) +
+  # geom_hline(yintercept = 0, color = "grey60") +
   geom_line(aes(t, estimate)) +
   geom_ribbon(aes(x=t, ymin=conf.low, ymax=conf.high), linetype=2, alpha=0.1) +
   facet_grid(EPU + Season ~ term) +
@@ -240,7 +254,7 @@ tr_plot <- ggplot(data = td) +
        y = "",
        x = "Time") +
   theme_bw()
-tr_plot
+trend_plot
 ```
 
 
@@ -248,7 +262,8 @@ tr_plot
 
 ```{r loadings-plot, eval=TRUE, fig.align='center', fig.cap="Factor loadings by species and feeding guild.\\label{fig:loadings-plot}"}
 
-load_plot <- best_mod %>% 
+load_dat <- best_mod %>% 
+  group_by(EPU, Season) %>% 
   mutate(z_est = map(dat, ~coef(.x, type = "matrix")$Z),
          h_inv = map(z_est, ~varimax(.x)$rotmat),
          z_rot = map2(.x = z_est, .y = h_inv, ~ data.frame(.x %*% .y)),
@@ -257,13 +272,15 @@ load_plot <- best_mod %>%
   select(EPU, Season, comname, z_rot) %>% 
   unnest(c(comname, z_rot)) %>% 
   ungroup() %>% 
-  pivot_longer(-c(EPU, Season, comname), names_to = "Trend", values_to = "val") %>%
+  pivot_longer(-c(EPU, Season, comname), names_to = "trend", values_to = "val") %>%
   left_join(sp_guild, by = c("EPU", "Season", "comname")) %>%
-  mutate(val = ifelse(abs(val) <= 0.05,
-                      0,
-                      val),
-         comname = as.factor(comname))  
-
+  mutate(#val = ifelse(abs(val) <= 0.05,
+                      # 0,
+                      # val),
+         trend = gsub("X", "Trend ", trend)#,
+         # comname = as.factor(comname)
+         ) %>% 
+  na.omit(val)
 
 # ## get the estimated ZZ
 # Z_est <- coef(best_mod, type = "matrix")$Z
@@ -274,30 +291,32 @@ load_plot <- best_mod %>%
 # Z_rot = Z_est %*% H_inv
 # colnames(Z_rot) <- paste0("Trend_", 1:ncol(Z_rot))
 
-load_plot <- data.frame(Z_rot) %>%
-  mutate(comname = sp_names) %>%
-  pivot_longer(-comname, names_to = "Trend", values_to = "val") %>%
-  left_join(sp_guild, by = "comname") %>%
-  mutate(val = ifelse(abs(val) <= 0.05,
-                      0,
-                      val),
-         comname = as.factor(comname))
+# load_plot <- data.frame(Z_rot) %>%
+#   mutate(comname = sp_names) %>%
+#   pivot_longer(-comname, names_to = "Trend", values_to = "val") %>%
+#   left_join(sp_guild, by = "comname") %>%
+#   mutate(val = ifelse(abs(val) <= 0.05,
+#                       0,
+#                       val),
+#          comname = as.factor(comname))
 
 # guild_pal <- RColorBrewer::brewer.pal(length(unique(load_plot$`Feeding guild`)), name = "Dark2")
 
-load_plot <- ggplot(data = load_plot, aes(x = comname, yend = 0, xend = comname, y = val, color = feeding_guild)) +
+load_plot <- ggplot(data = load_dat, aes(y = comname, xend = 0, yend = comname, x = val, color = feeding_guild)) +
   geom_point() +
   geom_segment()+
-  facet_grid(EPU + Season ~ Trend) +
-  coord_flip() +
+  facet_grid(EPU + Season ~ trend) +
   scale_color_brewer(palette = "Dark2") +
-  scale_x_discrete(limits = rev(levels(load_plot$comname))) +
-  theme(axis.text.y = element_text(size = 4)) +
+  scale_y_discrete(limits = rev(levels(as.factor(load_dat$comname)))) +
   labs(title = "DFA factor loadings",
        subtitle = sprintf("Factor loadings by species and feeding guild"),
-       x = "Common name",
-       y = "loading") +
-  theme_bw()
+       y = "Common name",
+       x = "loading",
+       color = "Feeding guild") +
+  theme_bw() +
+  theme(axis.text.y = element_text(size = rel(.6)),
+        legend.position = "bottom") +
+  NULL
 load_plot
 
 ```
@@ -307,47 +326,57 @@ load_plot
 
 ```{r fits-plot, eval=TRUE, fig.align='center', fig.cap="Estimated trend and 95% CI and raw data (blue dots).\\label{fig:fits-plot}"}
 
-mod_fits <- get_dfa_fits(best_mod)
+fit_dat <- best_mod %>% 
+  group_by(EPU, Season) %>% 
+  mutate(sp_dat = purrr::map(dat, c("call", "data")),
+         comname = purrr::map(sp_dat, ~rownames(.x)),
+         fits = purrr::map(dat, get_dfa_fits)) %>% 
+  select(EPU, Season, fits) %>% 
+  unnest(fits) %>% 
+  ungroup()
 
-sp_names <- rownames(best_mod$call$data)
+# 
+# mod_fits <- get_dfa_fits(best_mod)
+# sp_names <- rownames(best_mod$call$data)
+# 
+# ex <- data.frame(sp_names,
+#                  mod_fits$ex, stringsAsFactors = FALSE)
+# colnames(ex) = c("comname", colnames(best_mod$call$data))
+# ex <- ex %>%
+#   pivot_longer(-comname, names_to = "Time", values_to = "est")
+# 
+# up <- data.frame(sp_names,
+#                  mod_fits$up, stringsAsFactors = FALSE)
+# colnames(up) = c("comname", colnames(best_mod$call$data))
+# up <- up %>%
+#   pivot_longer(-comname, names_to = "Time", values_to = "up")
+# 
+# lo <- data.frame(sp_names,
+#                  mod_fits$lo, stringsAsFactors = FALSE)
+# colnames(lo) = c("comname", colnames(best_mod$call$data))
+# lo <- lo %>%
+#   pivot_longer(-comname, names_to = "Time", values_to = "lo")
 
-ex <- data.frame(sp_names,
-                 mod_fits$ex, stringsAsFactors = FALSE)
-colnames(ex) = c("comname", colnames(best_mod$call$data))
-ex <- ex %>%
-  pivot_longer(-comname, names_to = "Time", values_to = "est")
+# 
+# raw <- data.frame(best_mod$marss$data) %>%
+#   tibble::rownames_to_column(var = "comname") %>%
+#   pivot_longer(-comname, names_to = "Time", values_to = "raw") %>%
+#   mutate(Time = gsub("X", "", Time))
 
-up <- data.frame(sp_names,
-                 mod_fits$up, stringsAsFactors = FALSE)
-colnames(up) = c("comname", colnames(best_mod$call$data))
-up <- up %>%
-  pivot_longer(-comname, names_to = "Time", values_to = "up")
-
-lo <- data.frame(sp_names,
-                 mod_fits$lo, stringsAsFactors = FALSE)
-colnames(lo) = c("comname", colnames(best_mod$call$data))
-lo <- lo %>%
-  pivot_longer(-comname, names_to = "Time", values_to = "lo")
-
-raw <- data.frame(best_mod$marss$data) %>%
-  tibble::rownames_to_column(var = "comname") %>%
-  pivot_longer(-comname, names_to = "Time", values_to = "raw") %>%
-  mutate(Time = gsub("X", "", Time))
-
-mod_fits <- ex %>%
-  left_join(up, by = c("comname", "Time")) %>%
-  left_join(lo, by = c("comname", "Time")) %>%
-  left_join(raw, by = c("comname", "Time")) %>%
-  mutate(Time = as.numeric(Time))
+# mod_fits <- ex %>%
+#   left_join(up, by = c("comname", "Time")) %>%
+#   left_join(lo, by = c("comname", "Time")) %>%
+#   left_join(raw, by = c("comname", "Time")) %>%
+#   mutate(Time = as.numeric(Time))
 
 
-fit_plot <- ggplot(data = mod_fits, aes(x = Time, y = est, ymin = lo, ymax = up)) +
-  geom_ribbon(color = "grey60", alpha = 0.1) +
+fit_plot <- ggplot(data = fit_dat, aes(x = Time, y = ex, ymin = lo, ymax = up, color = Season)) +
+  geom_ribbon(alpha = 0.1) +
   geom_line() +
-  geom_point(data = mod_fits, aes(x = Time, y = raw), color = "#0055A4", alpha = .75) +
-  facet_wrap(~comname) +
+  geom_point(data = fit_dat, aes(x = Time, y = raw, color = Season), alpha = .75) +
+  facet_wrap(comname ~ EPU) +
   labs(title = "DFA factor loadings",
-       subtitle = sprintf("Model fits and 95%% CI by species for %s in the %s", epu, season),
+       # subtitle = sprintf("Model fits and 95%% CI by species for %s in the %s", epu, season),
        x = "Time",
        y = "") +
   theme_bw()
