@@ -11,7 +11,8 @@ knitr::opts_chunk$set(echo = FALSE,
                       warning = FALSE,
                       message = FALSE,
                       dpi=300,
-                      fig.width=7)
+                      fig.width=10,
+                      fig.height = 10)
 
 ## Install required packages
 # remotes::install_github("nwfsc-timeseries/MARSS")
@@ -185,7 +186,7 @@ model_plot <- ggplot() +
   geom_point(data = mod_dat %>%  filter(n_covariate >= 2),
              aes(x = m, y = delta_AICc, shape = R, color = value), alpha = 0.8, position = position_jitter(w = 0.4, h = 0.0)) +
   geom_label_repel(
-    data = mod_dat %>% filter(!is.na(best_model)), aes(x = m, y = delta_AICc), label = "Best Model", size = 2,
+    data = mod_dat %>% filter(!is.na(best_model)), aes(x = m, y = delta_AICc), label = "Best Model", size = 4,
     box.padding = 1, point.padding = 0, min.segment.length = 0, force = 0.5) +
   facet_grid(EPU + Season ~ n_covariate) +
   scale_color_brewer(type = "qual", palette = "Set1") +
@@ -312,11 +313,10 @@ trend_nested_plots <-
                        geom_line(aes(t, estimate)) +
                        geom_ribbon(aes(x=t, ymin=conf.low, ymax=conf.high), linetype=2, alpha=0.1) +
                        facet_grid( ~ term) +
-                       labs(title = sprintf("%s in the %s", y, z)#,
+                       labs(title = sprintf("%s in the %s", y, z),
                             # subtitle = "DFA trends", 
                             # y = "",
-                            # x = "Time"
-                            ) +
+                            x = "") +
                        theme_bw() +
                        NULL)) %>% 
   select(EPU, Season, trend_plot)
@@ -345,7 +345,7 @@ load_nested_plots <-
                             x = "loading",
                             color = "Feeding guild") +
                        theme_bw() +
-                       theme(axis.text.y = element_text(size = rel(.6)),
+                       theme(axis.text.y = element_text(size = rel(.7)),
                              legend.position = "bottom") +
                        NULL)) %>% 
   select(EPU, Season, load_plot)
@@ -382,7 +382,8 @@ fit_nested_plot <- fit_nested %>%
                                 # subtitle = sprintf("Model fits and 95%% CI by species for %s in the %s", y, z),
                                 x = "Time",
                                 y = "") +
-                           theme_bw()))
+                           theme_bw() +
+                           theme(strip.text.x = element_text(size = 6))))
 
 # fit_nested_plot$fit_plot
 invisible(lapply(fit_nested_plot$fit_plot, function(x) print(x)))
@@ -403,5 +404,8 @@ invisible(lapply(fit_nested_plot$fit_plot, function(x) print(x)))
 
 ## Discussion
 
+
+What's next: 
+* 
 
 
