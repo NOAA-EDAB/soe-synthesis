@@ -30,102 +30,7 @@ library(ggplot2)
 library(ggrepel)
 library(patchwork)
 
-## Helper function to extract DFA fits ##
-get_dfa_fits <- function(MLEobj, dd = NULL, alpha = 0.05, return_tidy = TRUE) {
-  ## empty list for results
-  fits <- list()
-  ## extra stuff for var() calcs
-  Ey <- MARSS:::MARSShatyt(MLEobj)
-  ## model params
-  ZZ <- coef(MLEobj, type = "matrix")$Z
-  
-  ## number of obs ts
-  nn <- dim(Ey$ytT)[1]
-  ## number of time steps
-  TT <- dim(Ey$ytT)[2]
-  ## get the inverse of the rotation matrix
-  H_inv <- varimax(ZZ)$rotmat
-  ## check for covars
-  if (!is.null(dd)) {
-    DD <- coef(MLEobj, type = "matrix")$D
-    ## model expectation
-    fits$ex <- ZZ %*% H_inv %*% MLEobj$states + DD %*% dd
-  } else {
-    ## model expectation
-    fits$ex <- ZZ %*% H_inv %*% MLEobj$states
-  }
-  ## Var in model fits
-  VtT <- MARSSkfss(MLEobj)$VtT
-  VV <- NULL
-  for (tt in 1:TT) {
-    RZVZ <- coef(MLEobj, type = "matrix")$R - ZZ %*% VtT[,
-                                                         , tt] %*% t(ZZ)
-    SS <- Ey$yxtT[, , tt] - Ey$ytT[, tt, drop = FALSE] %*%
-      t(MLEobj$states[, tt, drop = FALSE])
-    VV <- cbind(VV, diag(RZVZ + SS %*% t(ZZ) + ZZ %*% t(SS)))
-  }
-  SE <- sqrt(VV)
-  ## upper & lower (1-alpha)% CI
-  fits$up <- qnorm(1 - alpha/2) * SE + fits$ex
-  fits$lo <- qnorm(alpha/2) * SE + fits$ex
-  fits$raw <- MLEobj$marss$data
-  if(return_tidy){
-    colnames(fits[["ex"]]) <-  colnames(MLEobj$call$data)
-    colnames(fits[["up"]]) <-  colnames(MLEobj$call$data)
-    colnames(fits[["lo"]]) <-  colnames(MLEobj$call$data)
-    colnames(fits[["raw"]]) <-  colnames(MLEobj$call$data)
-   
-    fits <- purrr::map_df(fits, ~ as.data.frame(.x), .id = "id") %>% 
-      dplyr::group_by(id) %>% 
-      dplyr::mutate(comname =  rownames(MLEobj$call$data)) %>% 
-      tidyr::pivot_longer(-c(comname, id), names_to = "Time", values_to = "val") %>%
-      tidyr::pivot_wider(names_from = id, values_from = val) %>% 
-      dplyr::mutate(Time = as.numeric(Time))
-    return(fits)
-  }
-  if(!return_tidy){
-    return(fits)
-  }
-}
-
-
-
-matrix_ci <- function(MLEobjCI, var = c("up", "lo", "raw")) {
-  
-  # MLEobjCI <- MARSSparamCIs(MLEobj, ...)
-  ## Needs to be after MARSSparamCI
-  
-  up = coef(MLEobjCI, what = "par.upCI")$Z
-  lo = coef(MLEobjCI, what = "par.lowCI")$Z
-  raw = coef(MLEobjCI, what = "par")$Z
-  ci_list <- list(up = up, lo = lo, raw = raw)
-
-  f = MLEobjCI$marss$fixed$Z
-  d = MLEobjCI$marss$free$Z
-  
-  dims = attr(MLEobjCI$marss, "model.dims")$Z
-  par_names <- rownames(MLEobjCI$call$data)
-  
-  delem = d
-  attr(delem, "dim") = attr(delem, "dim")[1:2]
-  
-  felem = f
-  attr(felem, "dim") = attr(felem, "dim")[1:2]
-  x = 1
-  par_mat <- lapply(1:3, function(x) matrix(felem + delem %*% ci_list[[x]], 
-                                            dims[1], dims[2]))
-  names(par_mat) <- names(ci_list)
-
-  return(par_mat[[var]])  
-  # purrr::map_df(par_mat, ~ as.data.frame(.x), .id = "id") %>% 
-  #   dplyr::group_by(id) %>% 
-  #   dplyr::mutate(comname =  par_names) %>% 
-  #   tidyr::pivot_longer(-c(comname, id), names_to = "trend", values_to = "val") %>%
-  #   tidyr::pivot_wider(names_from = id, values_from = val) %>% 
-  #   dplyr::mutate(trend = gsub("V", "Trend_", trend))
-  
-}
-  
+source("R/utilities.R")
 
 ## From Gavin: Evaluate predictive distribution https://gist.github.com/gavinfay/1efe578482ff1092e9cddfe74a291f35
 
@@ -171,7 +76,7 @@ We used [MARSS](https://cran.r-project.org/web/packages/MARSS/index.html) DFA as
 
 ```{r get-fits}
 
-mod_path <- "\\\\net.nefsc.noaa.gov/home5/slarge/projects/soe-synthesis/analysis/models/"
+mod_path <- "analysis/models/"
 
 mod_list <- tibble(file_path = list.files(mod_path)) %>%
   filter(!grepl("^kemz.*|model_out.*|marss-dfa.*|GB_fall-model_list.*|*.R", file_path)) %>% 
@@ -252,15 +157,16 @@ model_plot
 best_mod <- mod_dat %>%
   filter(!is.na(best_model)) %>%
   group_by(EPU, Season) %>% 
-  mutate(dat = purrr::map(file_path, ~readRDS(.x)), ## Get best models for each EPU and Season
-         sp_dat = purrr::map(dat, c("call", "data")), 
-         comname = purrr::map(sp_dat, ~rownames(.x)), ## Get the imput rows
-         trends = map(dat, tidy, type = "states"), ## Output trends
+  mutate(dat = map(file_path, ~readRDS(.x)), ## Get best models for each EPU and Season
+         sp_dat = map(dat, c("call", "data")), 
+         comname = map(sp_dat, ~rownames(.x)), ## Get the imput rows
+         trends = map(dat, tidy, type = "xtT"), ## Output trends
          z_est = map(dat, ~coef(.x, type = "matrix")$Z),
          h_inv = map(z_est, ~varimax(.x)$rotmat),
          z_rot = map2(.x = z_est, .y = h_inv, ~ data.frame(.x %*% .y)), ## Loadings
          fits = purrr::map(dat, get_dfa_fits)) %>%  ## and model fits
   select(-sp_dat, -z_est, -h_inv, -dat) ## remove extra and big files
+
 
 sp_names <- best_mod %>% 
   select(EPU, Season, comname) %>% 
@@ -282,7 +188,7 @@ sp_guild <- ecodata::nefsc_survey_disaggregated %>%
 trend_dat <- best_mod %>% 
   select(EPU, Season, trends) %>% 
   unnest(trends) %>%
-  mutate(term = gsub("X", "Trend ", term)) #%>%
+  mutate(term = gsub("X", "Trend ", .rownames)) #%>%
 
 load_dat <- best_mod %>% 
   select(EPU, Season, comname, z_rot) %>% 
@@ -393,9 +299,9 @@ ci_mod <- mod_dat %>%
   mutate(dat = purrr::map(file_path, ~readRDS(.x)),
          sp_dat = purrr::map(dat, c("call", "data")), 
          comname = purrr::map(sp_dat, ~rownames(.x)), ## Get the imput rows
-         trends = map(dat, tidy, type = "states"), ## Output trends
+         trends = map(dat, tidy, type = "xtT"), ## Output trends
          dat_ci = purrr::map(dat, ~MARSSparamCIs(.x, method = "hessian", alpha = 0.05,
-                                                        nboot = 1000, silent = FALSE)),
+                                                        nboot = 5000, silent = FALSE)),
          z_est = map(dat_ci, matrix_ci, var = "raw"),
          z_est_up = map(dat_ci, matrix_ci, var = "up"),
          z_est_lo = map(dat_ci, matrix_ci, var = "lo"),
@@ -409,20 +315,36 @@ ci_mod <- mod_dat %>%
   select(-sp_dat, -z_est, -z_est_lo, -z_est_up, -h_inv, -h_inv_lo, -h_inv_up, -dat, dat_ci) ## remove extra and big files
 
 
-tm <- ci_mod %>% 
-  mutate(z_est_up = map(dat_ci, matrix_ci, var = "up"),
-           h_inv_up = map(z_est_up, ~varimax(.x)$rotmat),
-           z_rot_up = map2(.x = z_est_up, .y = h_inv_up, ~ data.frame(.x %*% .y))) ## Loadings) %>% 
-  select(z_est) 
+tm <- mod_dat %>%
+  filter(!is.na(best_model)) %>%
+  head(1) %>% 
+  mutate(dat = purrr::map(file_path, ~readRDS(.x)),
+         dat_ci = purrr::map(dat, ~MARSSparamCIs(.x, method = "parametric", alpha = 0.05,
+                                                        nboot = 100, silent = FALSE)),
+         z_est = map(dat_ci, matrix_ci, var = "raw"),
+         z_est_up = map(dat_ci, matrix_ci, var = "up"),
+         z_est_lo = map(dat_ci, matrix_ci, var = "lo"),
+         h_inv = map(z_est, ~varimax(.x)$rotmat),
+         h_inv_lo = map(z_est_lo, ~varimax(.x)$rotmat),
+         h_inv_up = map(z_est_up, ~varimax(.x)$rotmat),
+         z_rot = map2(.x = z_est, .y = h_inv, ~ data.frame(.x %*% .y)), ## Loadings
+         z_rot_lo = map2(.x = z_est_lo, .y = h_inv_lo, ~ data.frame(.x %*% .y)), ## Loadings
+         z_rot_up = map2(.x = z_est_up, .y = h_inv_up, ~ data.frame(.x %*% .y))) %>%  ## Loadings
+  select(-dat, dat_ci)
+
+td <- mod_dat %>%
+  filter(!is.na(best_model)) %>%
+  head(1) %>% 
+  mutate(dat = purrr::map(file_path, ~readRDS(.x)))
+
+summary(td$dat[[1]])
+tt_ci <- MARSSparamCIs(td$dat[[1]], method = "parametric", nboot = 100, silent = FALSE)
+summary(tt_ci)
 
 
-summary(tt)
-tt_ci <- MARSSparamCIs(ci_mod$dat[[1]])
-tt <- ci_mod$dat[[1]]
+# tidy_tt <- tidy_ci(tt)
 
-tidy_tt <- tidy_ci(tt)
-
-print(tt_ci, digits = 3, what = "par")$Z
+print(tt_ci, digits = 3, what = "par.se")$Z
 
 raw <- coef(tt, type = "matrix", what = "par")$Z
 up <- coef(tt, type = "matrix", what = "par.upCI")$Z
