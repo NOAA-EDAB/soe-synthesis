@@ -1,4 +1,6 @@
 
+
+
 ## Helper function to extract DFA fits ##
 get_dfa_fits <- function(MLEobj, dd = NULL, alpha = 0.05, return_tidy = TRUE) {
   ## empty list for results
@@ -57,40 +59,58 @@ get_dfa_fits <- function(MLEobj, dd = NULL, alpha = 0.05, return_tidy = TRUE) {
   }
 }
 
+rotate_z <- function(MLEobjCI, var = c("raw", "up", "low")) {
 
+  # the rotation matrix for the Z
+  H.inv <- varimax(coef(MLEobjCI, type = "matrix")$Z)$rotmat
 
-matrix_ci <- function(MLEobjCI, var = c("up", "lo", "raw")) {
+  Z <- coef(MLEobjCI, type = "matrix")$Z
+  tmp <- MLEobjCI; tmp$par <- tmp$par.upCI
+  Z_up <- MARSS:::parmat(tmp)$Z
 
-  # MLEobjCI <- MARSSparamCIs(MLEobj, ...)
-  ## Needs to be after MARSSparamCI
+  tmp <- MLEobjCI; tmp$par <- tmp$par.lowCI
+  Z_low <- MARSS:::parmat(tmp)$Z
 
-  up = coef(MLEobjCI, what = "par.upCI")$Z
-  lo = coef(MLEobjCI, what = "par.lowCI")$Z
-  raw = coef(MLEobjCI, what = "par")$Z
-  ci_list <- list(up = up, lo = lo, raw = raw)
+  z_list = list(raw = data.frame(Z %*% H.inv),
+                up = data.frame(Z_up %*% H.inv),
+                low = data.frame(Z_low %*% H.inv))
 
-  f = MLEobjCI$marss$fixed$Z
-  d = MLEobjCI$marss$free$Z
-
-  dims = attr(MLEobjCI$marss, "model.dims")$Z
-  par_names <- rownames(MLEobjCI$call$data)
-
-  delem = d
-  attr(delem, "dim") = attr(delem, "dim")[1:2]
-
-  felem = f
-  attr(felem, "dim") = attr(felem, "dim")[1:2]
-  x = 1
-  par_mat <- lapply(1:3, function(x) matrix(felem + delem %*% ci_list[[x]],
-                                            dims[1], dims[2]))
-  names(par_mat) <- names(ci_list)
-
-  return(par_mat[[var]])
-  # purrr::map_df(par_mat, ~ as.data.frame(.x), .id = "id") %>%
-  #   dplyr::group_by(id) %>%
-  #   dplyr::mutate(comname =  par_names) %>%
-  #   tidyr::pivot_longer(-c(comname, id), names_to = "trend", values_to = "val") %>%
-  #   tidyr::pivot_wider(names_from = id, values_from = val) %>%
-  #   dplyr::mutate(trend = gsub("V", "Trend_", trend))
-
+  return(z_list[[var]])
 }
+
+
+# matrix_ci <- function(MLEobjCI, var = c("up", "lo", "raw")) {
+#
+#   # MLEobjCI <- MARSSparamCIs(MLEobj, ...)
+#   ## Needs to be after MARSSparamCI
+#
+#   up = coef(MLEobjCI, what = "par.upCI")$Z
+#   lo = coef(MLEobjCI, what = "par.lowCI")$Z
+#   raw = coef(MLEobjCI, what = "par")$Z
+#   ci_list <- list(up = up, lo = lo, raw = raw)
+#
+#   f = MLEobjCI$marss$fixed$Z
+#   d = MLEobjCI$marss$free$Z
+#
+#   dims = attr(MLEobjCI$marss, "model.dims")$Z
+#   par_names <- rownames(MLEobjCI$call$data)
+#
+#   delem = d
+#   attr(delem, "dim") = attr(delem, "dim")[1:2]
+#
+#   felem = f
+#   attr(felem, "dim") = attr(felem, "dim")[1:2]
+#
+#   par_mat <- lapply(1:3, function(x) matrix(felem + delem %*% ci_list[[x]],
+#                                             dims[1], dims[2]))
+#   names(par_mat) <- names(ci_list)
+#
+#   return(par_mat[[var]])
+#   # purrr::map_df(par_mat, ~ as.data.frame(.x), .id = "id") %>%
+#   #   dplyr::group_by(id) %>%
+#   #   dplyr::mutate(comname =  par_names) %>%
+#   #   tidyr::pivot_longer(-c(comname, id), names_to = "trend", values_to = "val") %>%
+#   #   tidyr::pivot_wider(names_from = id, values_from = val) %>%
+#   #   dplyr::mutate(trend = gsub("V", "Trend_", trend))
+#
+# }
